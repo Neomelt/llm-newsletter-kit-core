@@ -6,11 +6,17 @@ import urllib.request
 from pathlib import Path
 
 
-def _extract_headlines() -> list[str]:
+def _read_markdown() -> str:
     md_path = Path("playground/output/newsletter.md")
     if not md_path.exists():
+        return ""
+    return md_path.read_text(encoding="utf-8", errors="ignore")
+
+
+def _extract_headlines() -> list[str]:
+    text = _read_markdown()
+    if not text:
         return []
-    text = md_path.read_text(encoding="utf-8", errors="ignore")
     lines = [ln.strip() for ln in text.splitlines()]
 
     headlines = []
@@ -109,6 +115,28 @@ def main() -> int:
     except Exception as exc:
       print(f"notify error: {exc}")
       return 1
+
+    # Send full newsletter markdown in chunks (no jump required)
+    md = _read_markdown().strip()
+    if md:
+      chunk_size = 2500
+      chunks = [md[i:i+chunk_size] for i in range(0, len(md), chunk_size)]
+      total = len(chunks)
+      for i, chunk in enumerate(chunks, 1):
+        text_payload = {
+          "msg_type": "text",
+          "content": {"text": f"[Newsletter 全文 {i}/{total}]\n{chunk}"},
+        }
+        tdata = json.dumps(text_payload, ensure_ascii=False).encode("utf-8")
+        treq = urllib.request.Request(
+          webhook,
+          data=tdata,
+          headers={"Content-Type": "application/json"},
+          method="POST",
+        )
+        with urllib.request.urlopen(treq, timeout=15) as tresp:
+          print(tresp.read().decode("utf-8", errors="replace"))
+
     return 0
 
 

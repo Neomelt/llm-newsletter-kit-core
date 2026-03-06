@@ -1,0 +1,88 @@
+name: Newsletter Cron
+
+on:
+  schedule:
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: newsletter-cron-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generate-newsletter:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      NEWS_MODEL: gemini-flash-lite-latest
+      OUTPUT_LANGUAGE: Chinese
+      EXPERT_FIELDS: AI,Robotics,Autonomous Driving
+      NEWSLETTER_BRAND: Neomelt Tech Radar
+      TITLE_CONTEXT: 本周 AI 与机器人动态
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prepare playground input files
+        shell: bash
+        run: |
+          mkdir -p playground/data
+          cp playground/data-examples/articles.example.json playground/data/articles.json
+          cp playground/data-examples/template.example.html playground/data/template.html
+
+      - name: Build runtime config
+        shell: bash
+        run: |
+          test -n "$GEMINI_API_KEY" || (echo "GEMINI_API_KEY is missing" && exit 1)
+          today_iso=$(date -u +%F)
+          cat > playground/data/config.json <<EOF
+          {
+            "provider": "google",
+            "apiKey": "${GEMINI_API_KEY}",
+            "model": "${NEWS_MODEL}",
+            "outputLanguage": "${OUTPUT_LANGUAGE}",
+            "expertField": ["AI", "Robotics", "Autonomous Driving"],
+            "freeFormIntro": true,
+            "titleContext": "${TITLE_CONTEXT}",
+            "newsletterBrandName": "${NEWSLETTER_BRAND}",
+            "subscribePageUrl": "",
+            "displayDate": "${today_iso}",
+            "isoDate": "${today_iso}",
+            "maxRetries": 3,
+            "templateMarkers": {
+              "title": "title",
+              "content": "content"
+            }
+          }
+          EOF
+
+      - name: Generate newsletter
+        run: npm run playground:generate-newsletter
+
+      - name: Upload output artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: newsletter-output-${{ github.run_number }}
+          path: |
+            playground/output/newsletter.md
+            playground/output/newsletter.html
+            playground/output/usage.md
+
+      - name: Add summary
+        shell: bash
+        run: |
+          echo "## Newsletter generated" >> $GITHUB_STEP_SUMMARY
+          echo "- Model: ${NEWS_MODEL}" >> $GITHUB_STEP_SUMMARY
+          echo "- Language: ${OUTPUT_LANGUAGE}" >> $GITHUB_STEP_SUMMARY
+          echo "- Artifact: newsletter-output-${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY

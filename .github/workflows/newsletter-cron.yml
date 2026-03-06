@@ -38,8 +38,13 @@ jobs:
         shell: bash
         run: |
           mkdir -p playground/data
-          cp playground/data-examples/articles.example.json playground/data/articles.json
           cp playground/data-examples/template.example.html playground/data/template.html
+
+      - name: Build AI/Robotics article pool from RSS
+        shell: bash
+        run: |
+          python3 playground/build_articles_from_rss.py playground/data/articles.json 50
+          test -s playground/data/articles.json || (echo "articles.json is empty" && exit 1)
 
       - name: Build runtime config
         shell: bash

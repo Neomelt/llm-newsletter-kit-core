@@ -113,9 +113,5 @@ jobs:
           STATUS="${{ job.status }}"
           RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           TEXT="[Newsletter Cron] ${STATUS}\nRepo: ${{ github.repository }}\nRun: ${RUN_URL}"
-          payload=$(python3 - <<'PY'
-import json, os
-print(json.dumps({"msg_type":"text","content":{"text":os.environ["TEXT"]}}, ensure_ascii=False))
-PY
-)
+          payload=$(python3 -c 'import json,os;print(json.dumps({"msg_type":"text","content":{"text":os.environ["TEXT"]}}, ensure_ascii=False))')
           curl -sS -X POST "$FEISHU_WEBHOOK" -H 'Content-Type: application/json' -d "$payload"

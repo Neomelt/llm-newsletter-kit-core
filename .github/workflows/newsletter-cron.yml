@@ -16,7 +16,7 @@ jobs:
       contents: read
     env:
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      NEWS_MODEL: gemini-flash-lite-latest
+      NEWS_MODEL: gemini-2.0-flash-lite
       OUTPUT_LANGUAGE: Chinese
       EXPERT_FIELDS: AI,Robotics,Autonomous Driving
       NEWSLETTER_BRAND: Neomelt Tech Radar
@@ -73,7 +73,24 @@ jobs:
           EOF
 
       - name: Generate newsletter
-        run: npm run playground:generate-newsletter
+        shell: bash
+        run: |
+          set -e
+          if npm run playground:generate-newsletter; then
+            echo "generation succeeded with ${NEWS_MODEL}"
+          else
+            echo "primary model failed, fallback to gemini-2.0-flash"
+            python3 - <<'PY'
+import json
+from pathlib import Path
+p = Path('playground/data/config.json')
+cfg = json.loads(p.read_text())
+cfg['model'] = 'gemini-2.0-flash'
+p.write_text(json.dumps(cfg, ensure_ascii=False, indent=2))
+print('fallback model set to gemini-2.0-flash')
+PY
+            npm run playground:generate-newsletter
+          fi
 
       - name: Upload output artifact
         uses: actions/upload-artifact@v4

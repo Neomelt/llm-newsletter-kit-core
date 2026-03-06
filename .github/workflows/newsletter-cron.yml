@@ -15,12 +15,13 @@ jobs:
     permissions:
       contents: read
     env:
-      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      NEWS_MODEL: gemini-2.0-flash-lite
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+      NEWS_MODEL: deepseek-chat
       OUTPUT_LANGUAGE: Chinese
-      EXPERT_FIELDS: AI,Robotics,Autonomous Driving
       NEWSLETTER_BRAND: Neomelt Tech Radar
       TITLE_CONTEXT: 本周 AI 与机器人动态
+      DEEPSEEK_BASE_URL: https://api.deepseek.com/v1
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -49,12 +50,13 @@ jobs:
       - name: Build runtime config
         shell: bash
         run: |
-          test -n "$GEMINI_API_KEY" || (echo "GEMINI_API_KEY is missing" && exit 1)
+          test -n "$DEEPSEEK_API_KEY" || (echo "DEEPSEEK_API_KEY is missing" && exit 1)
           today_iso=$(date -u +%F)
           cat > playground/data/config.json <<EOF
           {
-            "provider": "google",
-            "apiKey": "${GEMINI_API_KEY}",
+            "provider": "openai",
+            "apiKey": "${DEEPSEEK_API_KEY}",
+            "baseURL": "${DEEPSEEK_BASE_URL}",
             "model": "${NEWS_MODEL}",
             "outputLanguage": "${OUTPUT_LANGUAGE}",
             "expertField": ["AI", "Robotics", "Autonomous Driving"],
@@ -64,7 +66,7 @@ jobs:
             "subscribePageUrl": "",
             "displayDate": "${today_iso}",
             "isoDate": "${today_iso}",
-            "maxRetries": 3,
+            "maxRetries": 2,
             "templateMarkers": {
               "title": "title",
               "content": "content"
@@ -79,14 +81,8 @@ jobs:
           if npm run playground:generate-newsletter; then
             echo "generation succeeded with ${NEWS_MODEL}"
           else
-            echo "primary model failed, fallback to gemini-2.0-flash"
-            if python3 -c "import json;from pathlib import Path;p=Path('playground/data/config.json');cfg=json.loads(p.read_text());cfg['model']='gemini-2.0-flash';p.write_text(json.dumps(cfg,ensure_ascii=False,indent=2));print('fallback model set to gemini-2.0-flash')" \
-              && npm run playground:generate-newsletter; then
-              echo "generation succeeded with fallback gemini-2.0-flash"
-            else
-              echo "LLM generation failed again, generating deterministic fallback newsletter"
-              python3 playground/fallback_generate_newsletter.py
-            fi
+            echo "LLM generation failed, generating deterministic fallback newsletter"
+            python3 playground/fallback_generate_newsletter.py
           fi
 
       - name: Upload output artifact
@@ -105,3 +101,21 @@ jobs:
           echo "- Model: ${NEWS_MODEL}" >> $GITHUB_STEP_SUMMARY
           echo "- Language: ${OUTPUT_LANGUAGE}" >> $GITHUB_STEP_SUMMARY
           echo "- Artifact: newsletter-output-${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Notify Feishu
+        if: always()
+        shell: bash
+        run: |
+          if [ -z "$FEISHU_WEBHOOK" ]; then
+            echo "FEISHU_WEBHOOK missing, skip notify"
+            exit 0
+          fi
+          STATUS="${{ job.status }}"
+          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          TEXT="[Newsletter Cron] ${STATUS}\nRepo: ${{ github.repository }}\nRun: ${RUN_URL}"
+          payload=$(python3 - <<'PY'
+import json, os
+print(json.dumps({"msg_type":"text","content":{"text":os.environ["TEXT"]}}, ensure_ascii=False))
+PY
+)
+          curl -sS -X POST "$FEISHU_WEBHOOK" -H 'Content-Type: application/json' -d "$payload"

@@ -26,6 +26,7 @@ import {
 type PlaygroundConfig = {
   provider: 'openai' | 'anthropic' | 'google' | 'togetherai';
   apiKey: string;
+  baseURL?: string;
   model: string;
   outputLanguage: string;
   expertField: string[];
@@ -76,7 +77,10 @@ async function main() {
 
   // 4. Create model from provider
   const providers = {
-    openai: () => createOpenAI({ apiKey: config.apiKey })(config.model),
+    openai: () =>
+      createOpenAI({ apiKey: config.apiKey, baseURL: config.baseURL })(
+        config.model,
+      ),
     anthropic: () => createAnthropic({ apiKey: config.apiKey })(config.model),
     google: () =>
       createGoogleGenerativeAI({ apiKey: config.apiKey })(config.model),

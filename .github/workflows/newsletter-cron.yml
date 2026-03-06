@@ -80,15 +80,7 @@ jobs:
             echo "generation succeeded with ${NEWS_MODEL}"
           else
             echo "primary model failed, fallback to gemini-2.0-flash"
-            python3 - <<'PY'
-import json
-from pathlib import Path
-p = Path('playground/data/config.json')
-cfg = json.loads(p.read_text())
-cfg['model'] = 'gemini-2.0-flash'
-p.write_text(json.dumps(cfg, ensure_ascii=False, indent=2))
-print('fallback model set to gemini-2.0-flash')
-PY
+            python3 -c "import json;from pathlib import Path;p=Path('playground/data/config.json');cfg=json.loads(p.read_text());cfg['model']='gemini-2.0-flash';p.write_text(json.dumps(cfg,ensure_ascii=False,indent=2));print('fallback model set to gemini-2.0-flash')"
             npm run playground:generate-newsletter
           fi
 

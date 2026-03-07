@@ -21,12 +21,19 @@ DEFAULT_FEEDS: List[Tuple[str, str]] = [
     ("https://blog.google/technology/ai/rss/", "ai"),
     ("https://venturebeat.com/category/ai/feed/", "ai"),
     ("https://huggingface.co/blog/feed.xml", "ai"),
+    ("https://developer.nvidia.com/blog/feed/", "ai"),
+    ("https://blogs.nvidia.com/feed/", "ai"),
+    ("https://techcrunch.com/category/artificial-intelligence/feed/", "ai"),
+    ("https://www.wired.com/feed/tag/ai/latest/rss", "ai"),
+    ("https://www.marktechpost.com/feed/", "ai"),
 
     # Robotics industry / ecosystem
     ("https://robohub.org/feed/", "robotics"),
     ("https://www.therobotreport.com/feed/", "robotics"),
     ("https://discourse.ros.org/latest.rss", "robotics"),
     ("https://spectrum.ieee.org/rss/robotics/fulltext", "robotics"),
+    ("https://www.roboticsbusinessreview.com/feed/", "robotics"),
+    ("https://www.unite.ai/feed/", "robotics"),
 
     # Robotics/autonomy OSS release streams
     ("https://github.com/ros-navigation/navigation2/releases.atom", "robotics"),
@@ -34,11 +41,14 @@ DEFAULT_FEEDS: List[Tuple[str, str]] = [
     ("https://github.com/gazebosim/gz-sim/releases.atom", "robotics"),
     ("https://github.com/NVIDIA-ISAAC-ROS/isaac_ros_common/releases.atom", "robotics"),
     ("https://github.com/PX4/PX4-Autopilot/releases.atom", "robotics"),
+    ("https://github.com/ros2/rosbag2/releases.atom", "robotics"),
+    ("https://github.com/ros-controls/ros2_control/releases.atom", "robotics"),
 
     # Academic frontier
     ("https://rss.arxiv.org/rss/cs.RO", "academic"),
     ("https://rss.arxiv.org/rss/cs.AI", "academic"),
     ("https://rss.arxiv.org/rss/cs.CV", "academic"),
+    ("https://rss.arxiv.org/rss/cs.LG", "academic"),
 ]
 
 ROBOTICS_KEYWORDS = [
@@ -58,6 +68,16 @@ STRIP_QUERY_KEYS = {
     "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "utm_id",
     "gclid", "fbclid", "igshid", "mc_cid", "mc_eid", "spm", "mkt_tok",
 }
+
+NOISE_TITLE_KEYWORDS = [
+    "help", "question", "how to", "install error", "issue with", "can't", "cannot", "failed", "error",
+    "求助", "报错", "安装失败", "请教", "怎么",
+]
+
+NEWS_TITLE_KEYWORDS = [
+    "release", "announc", "launch", "paper", "benchmark", "open source", "dataset",
+    "robot", "robotics", "autonomous", "nav2", "moveit", "gazebo", "isaac", "vla", "agent",
+]
 
 
 def clean_html(text: str) -> str:
@@ -237,7 +257,26 @@ def score_item(item: Dict) -> int:
     score += sum(2 for k in AI_KEYWORDS if k in t)
     score += sum(8 for k in COMPANY_KEYWORDS if k in t)
 
+    if any(k in t for k in NEWS_TITLE_KEYWORDS):
+        score += 8
+    if any(k in t for k in NOISE_TITLE_KEYWORDS):
+        score -= 20
+
     return score
+
+
+def is_newsworthy(item: Dict) -> bool:
+    title = (item.get("title") or "").lower()
+    source = (item.get("source") or "").lower()
+
+    if any(k in title for k in NOISE_TITLE_KEYWORDS):
+        return False
+
+    if "discourse.ros.org" in source:
+        if not any(k in title for k in NEWS_TITLE_KEYWORDS):
+            return False
+
+    return True
 
 
 def build_article(idx: int, item: Dict) -> Dict:
@@ -312,7 +351,7 @@ def main() -> int:
             if len(item.get("content", "")) > len(prev.get("content", "")):
                 dedup[key] = item
 
-    items = list(dedup.values())
+    items = [item for item in dedup.values() if is_newsworthy(item)]
     for item in items:
         item["score"] = score_item(item)
 

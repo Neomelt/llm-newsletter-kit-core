@@ -79,6 +79,11 @@ NEWS_TITLE_KEYWORDS = [
     "robot", "robotics", "autonomous", "nav2", "moveit", "gazebo", "isaac", "vla", "agent",
 ]
 
+RESEARCH_PRIORITY_KEYWORDS = [
+    "rl", "reinforcement learning", "vla", "embodied", "world model", "sim2real", "policy",
+    "diffusion policy", "imitation learning", "foundation model", "benchmark", "sota",
+]
+
 
 def clean_html(text: str) -> str:
     text = re.sub(r"<[^>]+>", " ", text or "")
@@ -299,17 +304,40 @@ def build_article(idx: int, item: Dict) -> Dict:
     }
 
 
+def is_research_priority(item: Dict) -> bool:
+    text = f"{item.get('title', '')} {item.get('content', '')} {item.get('source', '')}".lower()
+    if item.get("category") == "academic":
+        return True
+    return any(k in text for k in RESEARCH_PRIORITY_KEYWORDS)
+
+
 def select_balanced(items: List[Dict], max_items: int) -> List[Dict]:
+    research_target = min(8, max_items)
     robotics_target = int(max_items * 0.6)
     ai_target = max_items - robotics_target
 
+    research = [i for i in items if is_research_priority(i)]
     robotics = [i for i in items if i.get("category") in ("robotics", "academic")]
     ai = [i for i in items if i.get("category") == "ai"]
 
+    research.sort(key=lambda x: x["score"], reverse=True)
     robotics.sort(key=lambda x: x["score"], reverse=True)
     ai.sort(key=lambda x: x["score"], reverse=True)
 
-    picked = robotics[:robotics_target] + ai[:ai_target]
+    picked: List[Dict] = []
+    picked.extend(research[:research_target])
+
+    for item in robotics:
+        if len([x for x in picked if x.get("category") in ("robotics", "academic")]) >= robotics_target:
+            break
+        if item not in picked:
+            picked.append(item)
+
+    for item in ai:
+        if len([x for x in picked if x.get("category") == "ai"]) >= ai_target:
+            break
+        if item not in picked:
+            picked.append(item)
 
     if len(picked) < max_items:
         remaining = [i for i in items if i not in picked]

@@ -321,7 +321,7 @@ def select_balanced(items: List[Dict], max_items: int) -> List[Dict]:
 
 def main() -> int:
     output_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("playground/data/articles.json")
-    max_items = int(sys.argv[2]) if len(sys.argv) > 2 else 40
+    max_items = int(sys.argv[2]) if len(sys.argv) > 2 else 50
 
     raw_items: List[Dict] = []
     for feed, category in DEFAULT_FEEDS:

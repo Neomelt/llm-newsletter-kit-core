@@ -4,8 +4,16 @@ import re
 import sys
 import urllib.request
 import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Dict, List, Tuple
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover
+    ZoneInfo = None
 
 DEFAULT_FEEDS: List[Tuple[str, str]] = [
     # AI / LLM / Agent
@@ -46,11 +54,68 @@ COMPANY_KEYWORDS = [
     "unitree", "宇树", "deep robotics", "云深处", "figure", "boston dynamics", "agility", "tesla optimus",
 ]
 
+STRIP_QUERY_KEYS = {
+    "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "utm_id",
+    "gclid", "fbclid", "igshid", "mc_cid", "mc_eid", "spm", "mkt_tok",
+}
+
 
 def clean_html(text: str) -> str:
     text = re.sub(r"<[^>]+>", " ", text or "")
     text = re.sub(r"\s+", " ", text).strip()
     return text
+
+
+def normalize_url(url: str) -> str:
+    if not url:
+        return ""
+    try:
+        parts = urlsplit(url.strip())
+        q = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k not in STRIP_QUERY_KEYS]
+        new_query = urlencode(q)
+        path = parts.path.rstrip("/") or "/"
+        return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), path, new_query, ""))
+    except Exception:
+        return url.strip()
+
+
+def parse_datetime(value: str) -> datetime | None:
+    if not value:
+        return None
+
+    txt = value.strip()
+    try:
+        dt = parsedate_to_datetime(txt)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        pass
+
+    try:
+        txt2 = txt.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(txt2)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def now_local_date() -> datetime.date:
+    if ZoneInfo is not None:
+        return datetime.now(ZoneInfo("Asia/Shanghai")).date()
+    return datetime.now().date()
+
+
+def is_today_utc(dt_utc: datetime | None) -> bool:
+    if dt_utc is None:
+        return False
+    if ZoneInfo is not None:
+        local_dt = dt_utc.astimezone(ZoneInfo("Asia/Shanghai"))
+    else:
+        local_dt = dt_utc.astimezone()
+    return local_dt.date() == now_local_date()
 
 
 def fetch(url: str) -> bytes:
@@ -71,15 +136,25 @@ def parse_rss(root: ET.Element, source: str, category: str) -> List[Dict]:
         title = (item.findtext("title") or "").strip()
         link = (item.findtext("link") or "").strip()
         desc = clean_html(item.findtext("description") or "")
+        pub_raw = (
+            (item.findtext("pubDate") or "").strip()
+            or (item.findtext("{http://purl.org/dc/elements/1.1/date") or "").strip()
+        )
+        pub_dt = parse_datetime(pub_raw)
+
         if not title or not link:
             continue
+
         items.append(
             {
                 "title": title,
                 "url": link,
+                "normalized_url": normalize_url(link),
                 "content": desc,
                 "source": source,
                 "category": category,
+                "published_at": pub_dt.isoformat() if pub_dt else None,
+                "published_at_dt": pub_dt,
             }
         )
     return items
@@ -100,21 +175,33 @@ def parse_atom(root: ET.Element, source: str, category: str) -> List[Dict]:
             first = entry.find("atom:link", ns)
             if first is not None and first.attrib.get("href"):
                 link = first.attrib["href"].strip()
+
         summary = (
             entry.findtext("atom:summary", namespaces=ns)
             or entry.findtext("atom:content", namespaces=ns)
             or ""
         )
         summary = clean_html(summary)
+
+        pub_raw = (
+            (entry.findtext("atom:updated", namespaces=ns) or "").strip()
+            or (entry.findtext("atom:published", namespaces=ns) or "").strip()
+        )
+        pub_dt = parse_datetime(pub_raw)
+
         if not title or not link:
             continue
+
         items.append(
             {
                 "title": title,
                 "url": link,
+                "normalized_url": normalize_url(link),
                 "content": summary,
                 "source": source,
                 "category": category,
+                "published_at": pub_dt.isoformat() if pub_dt else None,
+                "published_at_dt": pub_dt,
             }
         )
     return items
@@ -168,7 +255,8 @@ def build_article(idx: int, item: Dict) -> Dict:
         "targetUrl": item["source"],
         "importanceScore": min(10, max(1, int(item.get("score", 50) / 10))),
         "contentType": "News",
-        "url": item["url"],
+        "url": item["normalized_url"] or item["url"],
+        "publishedAt": item.get("published_at"),
     }
 
 
@@ -209,9 +297,20 @@ def main() -> int:
         except Exception as exc:
             print(f"[WARN] feed failed: {feed} ({exc})")
 
-    dedup = {}
-    for item in raw_items:
-        dedup[item["url"]] = item
+    # Keep only today's items (Asia/Shanghai)
+    today_items = [i for i in raw_items if is_today_utc(i.get("published_at_dt"))]
+
+    # Strong dedupe by normalized URL first, then title+source fallback
+    dedup: Dict[str, Dict] = {}
+    for item in today_items:
+        key = item.get("normalized_url") or f"{item.get('title','').strip().lower()}|{item.get('source','')}"
+        prev = dedup.get(key)
+        if prev is None:
+            dedup[key] = item
+        else:
+            # prefer richer content
+            if len(item.get("content", "")) > len(prev.get("content", "")):
+                dedup[key] = item
 
     items = list(dedup.values())
     for item in items:
@@ -227,7 +326,10 @@ def main() -> int:
 
     robot_cnt = sum(1 for a in articles if a["tag1"] == "Robotics")
     ai_cnt = len(articles) - robot_cnt
-    print(f"Generated {len(articles)} articles -> {output_path} (Robotics={robot_cnt}, AI={ai_cnt})")
+    print(
+        f"Fetched={len(raw_items)}, Today={len(today_items)}, Dedup={len(items)}, "
+        f"Generated={len(articles)} -> {output_path} (Robotics={robot_cnt}, AI={ai_cnt})"
+    )
     return 0
 
 
